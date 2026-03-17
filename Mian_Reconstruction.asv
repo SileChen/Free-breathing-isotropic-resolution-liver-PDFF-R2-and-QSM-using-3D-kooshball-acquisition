@@ -1,0 +1,48 @@
+%% Load 3D kooshball data(3.0T MRI Scanner, One healthy subject)
+load('Data/ReconParam.mat')
+load('Data/FirstEcho.mat')
+load('Data/Second&ThirdEcho.mat')
+setenv('CUDA_VISIBLE_DEVICES','2');
+gpuDevice(1);
+size(Res_Signal);    % Estimated Respiratory Signal based on SI-navigator
+
+size(kdata1_);       % Half-echo k-space data      [222,132228,20]  (k-space data   , Spoke Number , Coil Channel)
+size(DCF1);          % Half-echo radial weight     [222,132228]     (Weight         , Spoke Number)
+size(Crds1);         % Half-echo radial trajectory [3,222,132228]   (XYZ orientation, Readout point, Spoke Number)
+
+size(kdata2_);       % Full-echo k-space data      [416,132228,20]  (k-space data   , Spoke Number , Coil Channel)
+size(DCF2);          % Full-echo radial weight     [416,132228,2]   (weight         , Spoke Number , 2nd&3rd echo)
+size(Crds2);         % Full-echo radial trajectory [3,416,132228,2] (XYZ orientation, Readout point, Spoke Number, 2nd&3rd echo)
+%% Coilmaps Estimation using ESPIRIT (Calculate in The Berkeley Advanced Reconstruction Toolbox(BART, https://doi.org/10.5281/zenodo.592960), Website: https://mrirecon.github.io/bart/)
+traj = Crds1;
+DCF = permute(DCF1,[3 1 2]);
+nc = size(kdata1_,3);
+ksdata = reshape(kdata1_,[1 size(kdata1_)]);
+tj = traj(:,:,1:10000);
+kd = ksdata(:,:,1:10000,:).*repmat(DCF(:,:,1:10000),[1 1 1 nc]);
+img = bart(['nufft -a -d',num2str(208),':',num2str(164),':',num2str(126)],tj,kd);
+ksp_coil = bart('fft -u 7', img);
+coilmaps = bart(['ecalib -r',num2str(nc),' -m1 -c0'],ksp_coil);
+%% Main Reconstruction Code
+% Echo 1
+[recon_nufft1,recon_LR1] = LiverRecon_4D(kdata1_,kdata_SI(:,:,:,1),coilmaps,squeeze(Crds1),squeeze(DCF1),Res_Signal,Card_Signal,reconParam);
+% Echo 2
+[recon_nufft2,recon_LR2] = LiverRecon_4D(kdata2_,kdata_SI(:,:,:,1),coilmaps,squeeze(Crds2(:,:,:,1)),squeeze(DCF2(:,:,1)),Res_Signal,Card_Signal,reconParam);
+% Echo 3
+[recon_nufft3,recon_LR3] = LiverRecon_4D(kdata3_,kdata_SI(:,:,:,1),coilmaps(end:-1:1,end:-1:1,end:-1:1,:),squeeze(Crds2(:,:,:,2)),squeeze(DCF2(:,:,2)),Res_Signal,Card_Signal,reconParam);
+recon_nufft3 = recon_nufft3(end:-1:1,end:-1:1,end:-1:1,:);
+recon_LR3 = recon_LR3(end:-1:1,end:-1:1,end:-1:1,:);
+%% Display Result
+figure
+subplot(231)
+imagesc(rot90(abs(recon_LR1(:,:,53,10))));colormap gray;axis off;title('LR Echo1')
+subplot(232)
+imagesc(rot90(abs(recon_LR2(:,:,53,10))));colormap gray;axis off;title('LR Echo2')
+subplot(233)
+imagesc(rot90(abs(recon_LR3(:,:,53,10))));colormap gray;axis off;title('LR Echo3')
+subplot(234)
+imagesc(rot90(abs(recon_nufft1(:,:,53,10))));colormap gray;axis off;title('NUFFT Echo1')
+subplot(235)
+imagesc(rot90(abs(recon_nufft2(:,:,53,10))));colormap gray;axis off;title('NUFFT Echo2')
+subplot(236)
+imagesc(rot90(abs(recon_nufft3(:,:,53,10))));colormap gray;axis off;title('NUFFT Echo3')
